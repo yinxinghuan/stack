@@ -28,23 +28,27 @@
     padding-top: env(safe-area-inset-top);
   }
   .hud .label {
-    margin-top: 22px; font-size: 17px; letter-spacing: 0.32em;
+    margin-top: 26px; font-size: 13px; letter-spacing: 0.42em;
     color: var(--accent); text-transform: uppercase;
     text-shadow: 0 0 12px rgba(255,197,85,0.55);
+    opacity: 0.9;
   }
   .hud .counter {
-    margin-top: 2px; font-size: 64px; font-weight: 700; line-height: 1;
-    color: #fff; letter-spacing: 0.02em;
-    text-shadow: 0 0 18px rgba(255,255,255,0.5), 0 0 38px rgba(255,197,85,0.32);
+    margin-top: 6px; font-size: 72px; font-weight: 200; line-height: 1;
+    color: #fff; letter-spacing: 0.04em;
+    text-shadow:
+      0 0 18px rgba(255,255,255,0.6),
+      0 0 42px rgba(255,197,85,0.38),
+      0 4px 24px rgba(255,197,85,0.15);
     font-variant-numeric: tabular-nums;
-    transition: transform 0.14s ease;
+    transition: transform 0.14s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
-  .hud .counter.burst { transform: scale(1.16); }
+  .hud .counter.burst { transform: scale(1.18); }
   .hud .combo-row {
-    margin-top: 8px;
-    font-size: 13px; letter-spacing: 0.24em;
-    color: rgba(255,255,255,0.65); text-transform: uppercase;
-    display: flex; gap: 18px; justify-content: center; align-items: center;
+    margin-top: 10px;
+    font-size: 12px; letter-spacing: 0.28em;
+    color: rgba(255,255,255,0.55); text-transform: uppercase;
+    display: flex; gap: 24px; justify-content: center; align-items: center;
   }
   .hud .combo { color: #fff; text-shadow: 0 0 10px var(--accent); transition: transform 0.18s ease, color 0.2s ease; }
   .hud .combo.big { transform: scale(1.4); color: #ff6ad5; text-shadow: 0 0 14px #ff6ad5; }
@@ -233,6 +237,7 @@
 
   // ----- Constants ----------------------------------------------------------
   const BLOCK_H               = 36;            // block height
+  const BLOCK_DEPTH           = 14;            // pseudo-3D depth offset (px)
   const INITIAL_BLOCK_W       = 240;           // starting candidate / ground width
   const CANDIDATE_VX_BASE     = 260;           // px/s
   const CANDIDATE_VX_GROWTH   = 3.2;           // per height added
@@ -270,6 +275,7 @@
       floatTexts: [],                  // "+N" floating bonus texts
       flashAlpha: 0,                   // 1-frame screen flash on perfect
       chunks: [],                      // falling overhang pieces
+      ambient: [],                     // background drifting motes
       shake: 0,
       interacted: false,
     };
@@ -278,6 +284,24 @@
   spawnCandidate();
 
   function score() { return state.blocks.length - 1; }   // ground doesn't count
+
+  // ----- Ambient background motes -------------------------------------------
+  function spawnAmbient() {
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: (0.6 + Math.random() * 1.6) * baseScale,
+      vy: -(8 + Math.random() * 18),         // drift slowly upward
+      vx: (Math.random() - 0.5) * 6,
+      alpha: 0.2 + Math.random() * 0.4,
+      hueShift: (Math.random() - 0.5) * 80,  // small variation around theme accent
+    };
+  }
+  for (let i = 0; i < 60; i++) {
+    const m = spawnAmbient();
+    m.y = Math.random() * H;                  // start scattered everywhere
+    state.ambient.push(m);
+  }
 
   // ----- Candidate generation -----------------------------------------------
   function spawnCandidate() {
@@ -808,17 +832,73 @@
     }
     // Screen flash decay
     if (state.flashAlpha > 0) state.flashAlpha = Math.max(0, state.flashAlpha - 2.0 * dt);
+
+    // Ambient motes: drift, recycle when off-screen
+    for (const m of state.ambient) {
+      m.y += m.vy * dt;
+      m.x += m.vx * dt;
+      if (m.y < -10 || m.x < -10 || m.x > W + 10) {
+        // recycle: respawn at bottom
+        m.x = Math.random() * W;
+        m.y = H + Math.random() * 40;
+        m.vy = -(8 + Math.random() * 18);
+        m.vx = (Math.random() - 0.5) * 6;
+        m.r = (0.6 + Math.random() * 1.6) * baseScale;
+        m.alpha = 0.2 + Math.random() * 0.4;
+      }
+    }
   }
 
   function fillBackground() {
     ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, W, H);
-    // Soft vertical gradient
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = grad;
+    // Radial gradient — lighter near center-top, dark vignette at edges
+    const cx = W / 2, cy = H * 0.4;
+    const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.85);
+    rg.addColorStop(0, 'rgba(255,255,255,0.05)');
+    rg.addColorStop(0.6, 'rgba(0,0,0,0)');
+    rg.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = rg;
     ctx.fillRect(0, 0, W, H);
+    // Subtle horizon line where the tower visually "stands"
+    const horizonY = topAnchorY() + BLOCK_H * 1.5;
+    const lg = ctx.createLinearGradient(0, horizonY - 60, 0, horizonY + 60);
+    lg.addColorStop(0, 'rgba(255,255,255,0)');
+    lg.addColorStop(0.5, 'rgba(255,255,255,0.025)');
+    lg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = lg;
+    ctx.fillRect(0, horizonY - 60, W, 120);
+  }
+
+  function drawAmbient() {
+    const accentHue = getAccentHue();
+    for (const m of state.ambient) {
+      ctx.globalAlpha = m.alpha;
+      ctx.fillStyle = `hsl(${(accentHue + m.hueShift + 360) % 360}, 70%, 75%)`;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function getAccentHue() {
+    // Parse theme.accent as hex and approx HSL hue. Quick + cheap.
+    const hex = theme.accent.replace('#', '');
+    const r = parseInt(hex.slice(0, 2), 16) / 255;
+    const g = parseInt(hex.slice(2, 4), 16) / 255;
+    const b = parseInt(hex.slice(4, 6), 16) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    let h = 0;
+    if (mx !== mn) {
+      const d = mx - mn;
+      switch (mx) {
+        case r: h = ((g - b) / d) % 6; break;
+        case g: h = (b - r) / d + 2; break;
+        case b: h = (r - g) / d + 4; break;
+      }
+      h *= 60; if (h < 0) h += 360;
+    }
+    return h;
   }
 
   function topAnchorY() { return H * TOP_ANCHOR_FRAC; }
@@ -835,34 +915,88 @@
     return topAnchorY() - BLOCK_H - state.cameraOffset;
   }
 
+  // Pseudo-3D block — 3 faces (front / top / right) with gradient shading,
+  // soft drop shadow, and subtle gloss highlight along the top-front edge.
   function drawBlock(b, topY, alpha = 1) {
-    const baseColor = `hsl(${b.hue}, 78%, 55%)`;
-    const highlight = `hsl(${b.hue}, 78%, 70%)`;
-    const shadow    = `hsl(${b.hue}, 78%, 38%)`;
+    const hue = b.hue;
+    const lightColor = `hsl(${hue}, 82%, 65%)`;
+    const midColor   = `hsl(${hue}, 78%, 50%)`;
+    const midColor2  = `hsl(${hue}, 78%, 42%)`;
+    const darkColor  = `hsl(${hue}, 78%, 30%)`;
+    const glossColor = `hsla(${hue}, 95%, 85%, 0.65)`;
+    const d = BLOCK_DEPTH * baseScale;
+
     ctx.globalAlpha = alpha;
-    // Drop shadow under block
-    ctx.fillStyle = 'rgba(0,0,0,0.20)';
-    ctx.fillRect(b.x + 4, topY + BLOCK_H - 4, b.width, 6);
-    // Main face
-    ctx.fillStyle = baseColor;
+
+    // Soft drop shadow underneath
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur  = 14 * baseScale;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 8 * baseScale;
+    ctx.fillStyle = 'rgba(0,0,0,0.0001)';  // shadow needs a fill to render
+    ctx.fillRect(b.x + 6, topY + BLOCK_H - 4, b.width - 12, 4);
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Right side face (parallelogram going back-up-right)
+    ctx.fillStyle = darkColor;
+    ctx.beginPath();
+    ctx.moveTo(b.x + b.width, topY);
+    ctx.lineTo(b.x + b.width + d, topY - d);
+    ctx.lineTo(b.x + b.width + d, topY + BLOCK_H - d);
+    ctx.lineTo(b.x + b.width, topY + BLOCK_H);
+    ctx.closePath();
+    ctx.fill();
+
+    // Front face with vertical gradient (top brighter, bottom slightly darker)
+    const grad = ctx.createLinearGradient(0, topY, 0, topY + BLOCK_H);
+    grad.addColorStop(0, midColor);
+    grad.addColorStop(1, midColor2);
+    ctx.fillStyle = grad;
     ctx.fillRect(b.x, topY, b.width, BLOCK_H);
-    // Top highlight strip (4px)
-    ctx.fillStyle = highlight;
-    ctx.fillRect(b.x, topY, b.width, 4);
-    // Bottom shadow strip
-    ctx.fillStyle = shadow;
-    ctx.fillRect(b.x, topY + BLOCK_H - 4, b.width, 4);
+
+    // Top face (parallelogram going back-up)
+    ctx.fillStyle = lightColor;
+    ctx.beginPath();
+    ctx.moveTo(b.x, topY);
+    ctx.lineTo(b.x + d, topY - d);
+    ctx.lineTo(b.x + b.width + d, topY - d);
+    ctx.lineTo(b.x + b.width, topY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Gloss highlight: 1.5px bright strip along the top-front edge
+    ctx.fillStyle = glossColor;
+    ctx.fillRect(b.x, topY, b.width, 1.5 * baseScale);
+
+    // Subtle inner shadow on the right (below the side face) for depth
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(b.x + b.width - 3, topY, 3, BLOCK_H);
+
     ctx.globalAlpha = 1;
   }
 
   function drawTower() {
-    // Draw blocks from top to bottom (so shadow stacking is right)
+    // Draw blocks from bottom-up so 3D side faces overlap correctly:
+    // farther (lower-index = lower on screen) renders first.
     const lastIdx = state.blocks.length - 1;
+    // collect visible
+    const visible = [];
     for (let i = lastIdx; i >= 0; i--) {
-      const b = state.blocks[i];
       const topY = blockTopY(i);
-      if (topY > H + BLOCK_H) break;       // off-screen below
-      drawBlock(b, topY);
+      if (topY > H + BLOCK_H + BLOCK_DEPTH) break;
+      visible.push({ b: state.blocks[i], topY, i });
+    }
+    // draw in reverse order (oldest first, top of stack last)
+    for (let k = visible.length - 1; k >= 0; k--) {
+      const { b, topY, i } = visible[k];
+      // Depth fade: blocks lower on screen (further down the tower) get
+      // progressively darker and slightly desaturated, suggesting depth.
+      const depthBelow = (lastIdx - i);
+      const fadeAlpha = Math.max(0.45, 1 - depthBelow * 0.038);
+      drawBlock(b, topY, fadeAlpha);
     }
   }
   function drawCandidate() {
@@ -960,6 +1094,7 @@
     ctx.translate(sx, sy);
 
     fillBackground();
+    drawAmbient();
     drawTower();
     drawChunks();
     drawCandidate();
