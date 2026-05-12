@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="icon" type="image/gif" href="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" />
+<title>Stack</title>
+<style>
+  :root { --bg: #060716; --accent: #ffc555; --warn: #ff5060; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--bg);
+    color: #fff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+    overflow: hidden; user-select: none; touch-action: none;
+    overscroll-behavior: none;
+  }
+  body { border-radius: 24px; overflow: hidden; position: relative; }
+  #stage { position: absolute; inset: 0; display: block; width: 100%; height: 100%; background: var(--bg); }
+
+  .hud {
+    position: absolute; left: 0; right: 0; top: 0;
+    text-align: center; pointer-events: none;
+    padding-top: env(safe-area-inset-top);
+  }
+  .hud .label {
+    margin-top: 22px; font-size: 17px; letter-spacing: 0.32em;
+    color: var(--accent); text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(255,197,85,0.55);
+  }
+  .hud .counter {
+    margin-top: 2px; font-size: 64px; font-weight: 700; line-height: 1;
+    color: #fff; letter-spacing: 0.02em;
+    text-shadow: 0 0 18px rgba(255,255,255,0.5), 0 0 38px rgba(255,197,85,0.32);
+    font-variant-numeric: tabular-nums;
+    transition: transform 0.14s ease;
+  }
+  .hud .counter.burst { transform: scale(1.16); }
+  .hud .combo-row {
+    margin-top: 8px;
+    font-size: 13px; letter-spacing: 0.24em;
+    color: rgba(255,255,255,0.65); text-transform: uppercase;
+    display: flex; gap: 18px; justify-content: center; align-items: center;
+  }
+  .hud .combo { color: #fff; text-shadow: 0 0 10px var(--accent); transition: transform 0.18s ease, color 0.2s ease; }
+  .hud .combo.big { transform: scale(1.4); color: #ff6ad5; text-shadow: 0 0 14px #ff6ad5; }
+  .hud .best { color: rgba(255,255,255,0.45); }
+  .hud .best b { color: rgba(255,255,255,0.78); font-weight: 700; }
+  .hud .perfect-banner {
+    position: absolute; left: 0; right: 0; top: 0;
+    text-align: center;
+    font-size: 22px; font-weight: 800;
+    color: #ff6ad5;
+    letter-spacing: 0.28em;
+    text-shadow: 0 0 14px #ff6ad5, 0 0 28px rgba(255,106,213,0.7);
+    transform: translateY(0); opacity: 0;
+    transition: transform 0.45s ease, opacity 0.45s ease;
+    padding-top: calc(120px + env(safe-area-inset-top));
+    pointer-events: none;
+  }
+  .hud .perfect-banner.flash {
+    opacity: 1;
+    transform: translateY(20px);
+  }
+  .hud .hint {
+    margin-top: 22px; font-size: 13px; letter-spacing: 0.28em;
+    color: rgba(255,255,255,0.42); text-transform: uppercase;
+    animation: st-pulse 2.4s ease-in-out infinite;
+  }
+  .hud .hint.hidden { opacity: 0; animation: none; transition: opacity 0.5s ease; }
+  @keyframes st-pulse {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
+  }
+
+  .theme-dots {
+    position: absolute; right: 14px; top: 14px;
+    display: flex; gap: 8px; padding: 8px;
+    pointer-events: auto;
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+  .theme-dots .dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    cursor: pointer; opacity: 0.5;
+    transition: transform 0.18s ease, opacity 0.18s ease;
+    box-shadow: 0 0 8px currentColor;
+  }
+  .theme-dots .dot.active { opacity: 1; transform: scale(1.18); }
+  .theme-dots .dot[data-t="prism"]  { background: #ffc555; color: #ffc555; }
+  .theme-dots .dot[data-t="sunset"] { background: #ff6a3d; color: #ff6a3d; }
+  .theme-dots .dot[data-t="ocean"]  { background: #4cc3ff; color: #4cc3ff; }
+
+  .credits {
+    position: absolute; left: 0; right: 0; bottom: 16px;
+    text-align: center; color: rgba(255,255,255,0.22);
+    font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase;
+    pointer-events: none; padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .gameover {
+    position: absolute; inset: 0;
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 20;
+  }
+  .gameover.show { display: flex; }
+  .gameover-title {
+    font-size: 22px;
+    color: var(--warn);
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    text-shadow: 0 0 14px rgba(255,80,96,0.7);
+    margin-bottom: 8px;
+  }
+  .gameover-score {
+    font-size: 56px; font-weight: 700; color: #fff;
+    text-shadow: 0 0 20px rgba(255,255,255,0.5);
+    margin-bottom: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .gameover-stats {
+    font-size: 13px; letter-spacing: 0.24em;
+    color: rgba(255,255,255,0.65); text-transform: uppercase;
+    margin-bottom: 28px;
+  }
+  .gameover-btn {
+    background: transparent;
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 14px;
+    letter-spacing: 0.24em;
+    padding: 12px 28px;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(255,197,85,0.4);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .gameover-btn:active { transform: scale(0.95); background: rgba(255,197,85,0.12); }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <div class="hud">
+    <div class="label">Height</div>
+    <div class="counter" id="counter">0</div>
+    <div class="combo-row">
+      <span class="combo" id="combo">×0</span>
+      <span class="best">Best · <b id="best">0</b></span>
+    </div>
+    <div class="hint" id="hint">Tap to drop</div>
+    <div class="perfect-banner" id="perfectBanner">Perfect!</div>
+  </div>
+
+  <div class="theme-dots" id="themeDots">
+    <div class="dot active" data-t="prism"></div>
+    <div class="dot" data-t="sunset"></div>
+    <div class="dot" data-t="ocean"></div>
+  </div>
+
+  <div class="credits">Stack · Time the tap</div>
+
+  <div class="gameover" id="gameover">
+    <div class="gameover-title">Tower fell</div>
+    <div class="gameover-score" id="goverScore">0</div>
+    <div class="gameover-stats" id="goverStats">Best 0 · Top combo 0</div>
+    <button class="gameover-btn" id="restartBtn">Play again</button>
+  </div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ----- Themes ---------------------------------------------------------------
+  // Each block gets a hue that cycles smoothly as the tower grows. Themes
+  // determine the hue band: prism = full rainbow, sunset = warm, ocean = cool.
+  const THEMES = {
+    prism: {
+      bg: '#060716', accent: '#ffc555',
+      hueBase: 0, hueSpread: 360, hueStep: 14,    // °/block
+      ground: '#1a1d2e',
+      root: 130.81,
+    },
+    sunset: {
+      bg: '#150407', accent: '#ffb04a',
+      hueBase: 350, hueSpread: 80, hueStep: 4,
+      ground: '#241010',
+      root: 174.61,
+    },
+    ocean: {
+      bg: '#020a18', accent: '#7fd0ff',
+      hueBase: 165, hueSpread: 130, hueStep: 6,
+      ground: '#0e1a2d',
+      root: 196.00,
+    },
+  };
+
+  // ----- DOM + Canvas --------------------------------------------------------
+  const canvas      = document.getElementById('stage');
+  const ctx         = canvas.getContext('2d');
+  const counterEl   = document.getElementById('counter');
+  const comboEl     = document.getElementById('combo');
+  const bestEl      = document.getElementById('best');
+  const hintEl      = document.getElementById('hint');
+  const perfectBan  = document.getElementById('perfectBanner');
+  const dotsEl      = document.getElementById('themeDots');
+  const gameoverEl  = document.getElementById('gameover');
+  const goverScore  = document.getElementById('goverScore');
+  const goverStats  = document.getElementById('goverStats');
+  const restartBtn  = document.getElementById('restartBtn');
+
+  let W = 0, H = 0, DPR = 1, baseScale = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width  = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    baseScale = Math.min(W, H) / 414;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ----- Constants ----------------------------------------------------------
+  const BLOCK_H               = 36;            // block height
+  const INITIAL_BLOCK_W       = 240;           // starting candidate / ground width
+  const CANDIDATE_VX_BASE     = 260;           // px/s
+  const CANDIDATE_VX_GROWTH   = 3.2;           // per height added
+  const CANDIDATE_VX_CAP      = 540;
+  const PERFECT_TOLERANCE     = 7;             // px diff that counts as perfect
+  const TOP_ANCHOR_FRAC       = 0.42;          // tower top sits at this screen y
+  const CAMERA_LERP           = 9;             // smooth camera scroll
+  const HUE_START             = 0;
+
+  // ----- State --------------------------------------------------------------
+  let themeName = 'prism';
+  let theme = THEMES[themeName];
+
+  let state = newGame();
+  function newGame() {
+    const cx = W / 2;
+    const start = {
+      x: cx - INITIAL_BLOCK_W / 2,
+      width: INITIAL_BLOCK_W,
+      height: BLOCK_H,
+      hue: theme.hueBase % 360,
+    };
+    return {
+      blocks: [start],                 // index 0 = ground
+      candidate: null,
+      direction: 1,                    // +1 → moves right, -1 → moves left
+      cameraOffset: 0,                 // smooth scroll (px). Lerps to 0 after each drop.
+      combo: 0,
+      best: parseInt(localStorage.getItem('stack.best') || '0', 10) || 0,
+      bestCombo: parseInt(localStorage.getItem('stack.bestCombo') || '0', 10) || 0,
+      gameOver: false,
+      sparks: [],                      // perfect-drop sparkles
+      chunks: [],                      // falling overhang pieces
+      shake: 0,
+      interacted: false,
+    };
+  }
+  bestEl.textContent = state.best.toLocaleString('en-US');
+  spawnCandidate();
+
+  function score() { return state.blocks.length - 1; }   // ground doesn't count
+
+  // ----- Candidate generation -----------------------------------------------
+  function spawnCandidate() {
+    if (state.gameOver) return;
+    const prev = state.blocks[state.blocks.length - 1];
+    const speed = Math.min(CANDIDATE_VX_CAP, CANDIDATE_VX_BASE + score() * CANDIDATE_VX_GROWTH);
+    const hue = (theme.hueBase + ((state.blocks.length) * theme.hueStep)) % 360;
+    state.direction = -state.direction || 1;
+    // Spawn from the side, off-screen
+    const fromLeft = state.direction > 0;
+    const x = fromLeft ? -prev.width - 10 : W + 10;
+    state.candidate = {
+      x,
+      width: prev.width,
+      height: BLOCK_H,
+      hue,
+      vx: speed * (fromLeft ? 1 : -1),
+    };
+  }
+
+  // ----- Drop logic ---------------------------------------------------------
+  function tryDrop() {
+    if (state.gameOver || !state.candidate) return;
+    const c = state.candidate;
+    const prev = state.blocks[state.blocks.length - 1];
+    const overlapStart = Math.max(prev.x, c.x);
+    const overlapEnd   = Math.min(prev.x + prev.width, c.x + c.width);
+    const overlap      = overlapEnd - overlapStart;
+
+    if (overlap <= 0) {
+      // Total miss — the block falls into the abyss
+      state.chunks.push({
+        x: c.x, w: c.width, y: 0, vy: 0, vx: c.vx * 0.4, rot: 0, vr: (Math.random() - 0.5) * 6,
+        hue: c.hue, life: 1.4, maxLife: 1,
+      });
+      audio.die();
+      state.shake = 14;
+      state.gameOver = true;
+      goverScore.textContent = score().toLocaleString('en-US');
+      goverStats.textContent = `Best ${state.best.toLocaleString('en-US')} · Top combo ${state.bestCombo}`;
+      setTimeout(() => gameoverEl.classList.add('show'), 900);
+      return;
+    }
+
+    const offset = Math.abs(prev.x - c.x);
+    const isPerfect = offset < PERFECT_TOLERANCE;
+    let placed;
+    if (isPerfect) {
+      // Perfect: snap to previous block's x, keep full width, combo++
+      placed = { x: prev.x, width: prev.width, height: BLOCK_H, hue: c.hue };
+      state.combo++;
+      audio.perfect(state.combo);
+      spawnPerfectSparks(placed);
+      perfectBan.classList.add('flash');
+      setTimeout(() => perfectBan.classList.remove('flash'), 450);
+      state.shake = 3;
+    } else {
+      placed = { x: overlapStart, width: overlap, height: BLOCK_H, hue: c.hue };
+      // Falling chunks for the trimmed portion(s)
+      if (c.x < placed.x) {
+        // left overhang
+        state.chunks.push({
+          x: c.x, w: placed.x - c.x, y: 0, vy: 0, vx: -120 - Math.random() * 60,
+          rot: 0, vr: -2 - Math.random() * 3,
+          hue: c.hue, life: 1.4, maxLife: 1,
+        });
+      }
+      if (c.x + c.width > placed.x + placed.width) {
+        // right overhang
+        state.chunks.push({
+          x: placed.x + placed.width, w: (c.x + c.width) - (placed.x + placed.width),
+          y: 0, vy: 0, vx: 120 + Math.random() * 60,
+          rot: 0, vr: 2 + Math.random() * 3,
+          hue: c.hue, life: 1.4, maxLife: 1,
+        });
+      }
+      if (state.combo > 0) audio.comboBreak();
+      state.combo = 0;
+      audio.drop();
+      state.shake = 5;
+    }
+    if (state.combo > state.bestCombo) {
+      state.bestCombo = state.combo;
+      localStorage.setItem('stack.bestCombo', String(state.bestCombo));
+    }
+
+    state.blocks.push(placed);
+    counterEl.textContent = score().toString();
+    counterEl.classList.add('burst');
+    setTimeout(() => counterEl.classList.remove('burst'), 130);
+    comboEl.textContent = '×' + state.combo;
+    comboEl.classList.toggle('big', state.combo >= 5);
+
+    if (score() > state.best) {
+      state.best = score();
+      bestEl.textContent = state.best.toLocaleString('en-US');
+      localStorage.setItem('stack.best', String(state.best));
+    }
+
+    // Glass-shatter milestones on combo
+    if (state.combo === 5)       audio.glassBreak(0.7);
+    else if (state.combo === 10) audio.glassBreak(1.1);
+    else if (state.combo === 20) audio.glassBreak(1.6);
+    else if (state.combo > 20 && state.combo % 10 === 0) audio.glassBreak(1.8);
+
+    // Camera shift up by one block (smoothly scroll down: positive offset
+    // means visually shift everything up; lerps back to 0)
+    state.cameraOffset = BLOCK_H;
+    spawnCandidate();
+  }
+
+  function spawnPerfectSparks(placed) {
+    const hue = placed.hue;
+    const n = 22;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd = (140 + Math.random() * 200) * baseScale;
+      state.sparks.push({
+        x: placed.x + Math.random() * placed.width,
+        screenYOffset: 0,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd - 80,
+        life: 0.5 + Math.random() * 0.5,
+        maxLife: 1,
+        size: (1.4 + Math.random() * 2.0) * baseScale,
+        hue,
+      });
+    }
+  }
+
+  // ----- Input ---------------------------------------------------------------
+  canvas.addEventListener('pointerdown', () => {
+    if (state.gameOver) return;
+    if (!state.interacted) {
+      state.interacted = true;
+      audio.unlock();
+      hintEl.classList.add('hidden');
+    }
+    tryDrop();
+  });
+
+  // Theme dots
+  dotsEl.addEventListener('pointerdown', (e) => {
+    const t = e.target.closest('.dot');
+    if (!t) return;
+    const name = t.dataset.t;
+    if (!THEMES[name] || name === themeName) return;
+    themeName = name;
+    theme = THEMES[name];
+    document.body.style.background = theme.bg;
+    document.documentElement.style.setProperty('--bg', theme.bg);
+    document.documentElement.style.setProperty('--accent', theme.accent);
+    [...dotsEl.children].forEach(d => d.classList.toggle('active', d.dataset.t === name));
+    audio.onThemeChange();
+    // Reskin existing blocks to the new palette
+    state.blocks.forEach((b, i) => {
+      b.hue = (theme.hueBase + i * theme.hueStep) % 360;
+    });
+    if (state.candidate) {
+      state.candidate.hue = (theme.hueBase + state.blocks.length * theme.hueStep) % 360;
+    }
+  });
+
+  restartBtn.addEventListener('pointerdown', () => {
+    gameoverEl.classList.remove('show');
+    const oldBest = state.best;
+    const oldBestCombo = state.bestCombo;
+    state = newGame();
+    state.best = oldBest;
+    state.bestCombo = oldBestCombo;
+    state.interacted = true;
+    counterEl.textContent = '0';
+    comboEl.textContent = '×0';
+    comboEl.classList.remove('big');
+    spawnCandidate();
+  });
+
+  // ----- Audio --------------------------------------------------------------
+  // Tribal style: percussion-driven loop (kick + tom + shaker + conga rim).
+  // No melody — each player tap is a drum hit on top of the loop. The first
+  // 3 games used synthwave / cosmic-ambient / lo-fi; tribal is a clearly
+  // distinct sonic palette.
+  const audio = (() => {
+    let ac = null;
+    let masterGain, bgmGain, fxGain;
+    let delayNode, delayFb, delayWet;
+    let unlocked = false;
+    let bgmStarted = false;
+    let stepIdx = 0, nextStepT = 0;
+    let lastTapT = 0;
+
+    const BPM = 96;
+    const SIXTEENTH = 60 / BPM / 4;
+    const LOOP_STEPS = 16 * 2;             // 2-bar loop
+
+    function ensure() {
+      if (ac) return ac;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ac = new AC();
+      masterGain = ac.createGain(); masterGain.gain.value = 0.8; masterGain.connect(ac.destination);
+      delayNode = ac.createDelay(0.6);
+      delayNode.delayTime.value = SIXTEENTH * 3;
+      delayFb  = ac.createGain(); delayFb.gain.value = 0.36;
+      delayWet = ac.createGain(); delayWet.gain.value = 0.26;
+      delayNode.connect(delayFb); delayFb.connect(delayNode);
+      delayNode.connect(delayWet); delayWet.connect(masterGain);
+      bgmGain = ac.createGain(); bgmGain.gain.value = 0; bgmGain.connect(masterGain);
+      fxGain  = ac.createGain(); fxGain.gain.value = 1; fxGain.connect(masterGain);
+      return ac;
+    }
+    function unlock() {
+      if (unlocked) return;
+      if (!ensure()) return;
+      if (ac.state !== 'running') ac.resume();
+      unlocked = true;
+      setTimeout(() => {
+        if (!unlocked) return;
+        const t = ac.currentTime;
+        bgmGain.gain.setValueAtTime(0, t);
+        bgmGain.gain.linearRampToValueAtTime(0.50, t + 1.5);
+        nextStepT = t + 0.1;
+        stepIdx = 0;
+        bgmStarted = true;
+        scheduler();
+      }, 300);
+    }
+    function onThemeChange() {
+      if (!ac || !unlocked) return;
+      const t = ac.currentTime;
+      bgmGain.gain.cancelScheduledValues(t);
+      bgmGain.gain.setValueAtTime(bgmGain.gain.value, t);
+      bgmGain.gain.linearRampToValueAtTime(0.12, t + 0.2);
+      bgmGain.gain.linearRampToValueAtTime(0.50, t + 1.0);
+    }
+
+    // ----- Percussion voices ----------------------------------------------
+    function kick(t, vel = 0.65, freqStart = 130) {
+      const o = ac.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(freqStart, t);
+      o.frequency.exponentialRampToValueAtTime(45, t + 0.10);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(vel, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.20);
+      o.connect(g); g.connect(bgmGain);
+      o.start(t); o.stop(t + 0.24);
+    }
+    function tom(t, freq, vel = 0.35) {
+      const o = ac.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(freq, t);
+      o.frequency.exponentialRampToValueAtTime(freq * 0.5, t + 0.18);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(vel, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      // body noise
+      const len = Math.floor(ac.sampleRate * 0.06);
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() - 0.5) * 2 * (1 - i / len);
+      const ns = ac.createBufferSource(); ns.buffer = buf;
+      const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq * 2; bp.Q.value = 1.5;
+      const ng = ac.createGain(); ng.gain.value = vel * 0.4;
+      o.connect(g); g.connect(bgmGain);
+      ns.connect(bp); bp.connect(ng); ng.connect(bgmGain);
+      o.start(t); o.stop(t + 0.26); ns.start(t);
+    }
+    function shaker(t, vel = 0.12) {
+      const len = Math.floor(ac.sampleRate * 0.05);
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        const env = Math.pow(1 - i / len, 1.8);
+        data[i] = (Math.random() - 0.5) * 2 * env;
+      }
+      const ns = ac.createBufferSource(); ns.buffer = buf;
+      const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5500;
+      const g = ac.createGain(); g.gain.value = vel;
+      ns.connect(hp); hp.connect(g); g.connect(bgmGain);
+      ns.start(t);
+    }
+    function congaRim(t, vel = 0.20) {
+      const o = ac.createOscillator(); o.type = 'triangle';
+      o.frequency.setValueAtTime(400, t);
+      o.frequency.exponentialRampToValueAtTime(180, t + 0.06);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(vel, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 2;
+      o.connect(bp); bp.connect(g); g.connect(bgmGain);
+      o.start(t); o.stop(t + 0.12);
+    }
+    function dronePulse(t) {
+      // Subtle sub-bass drone every 2 bars
+      const o = ac.createOscillator(); o.type = 'sine';
+      o.frequency.value = theme.root * 0.25;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.10, t + 0.4);
+      g.gain.linearRampToValueAtTime(0.06, t + 2.0);
+      g.gain.linearRampToValueAtTime(0, t + 3.0);
+      o.connect(g); g.connect(bgmGain);
+      o.start(t); o.stop(t + 3.2);
+    }
+
+    function scheduleStep(stepGlobal, t) {
+      const step = stepGlobal % LOOP_STEPS;
+      const stepInBar = step % 16;
+      const barIdx = Math.floor(step / 16);
+      // Tribal pattern: kick on 1 & 9 (half-time), toms 5 & 13, shaker on 8ths,
+      // conga rim on the "and" of 2 (= step 6) every bar
+      if (stepInBar === 0)  kick(t, 0.72);
+      if (stepInBar === 8)  kick(t, 0.55);
+      if (stepInBar === 4)  tom(t, theme.root * 1.6, 0.32);
+      if (stepInBar === 12) tom(t, theme.root * 1.2, 0.36);
+      if (stepInBar === 6)  congaRim(t, 0.22);
+      if (stepInBar === 14) congaRim(t, 0.18);
+      if (stepInBar % 2 === 0) shaker(t, stepInBar % 4 === 0 ? 0.10 : 0.07);
+      // Drone every 2 bars (start of bar 0)
+      if (step === 0) dronePulse(t);
+    }
+    function scheduler() {
+      if (!bgmStarted || !ac) return;
+      while (nextStepT < ac.currentTime + 0.25) {
+        scheduleStep(stepIdx, nextStepT);
+        stepIdx++;
+        nextStepT += SIXTEENTH;
+      }
+      setTimeout(scheduler, 30);
+    }
+
+    // ----- Event sounds ----------------------------------------------------
+    function drop() {
+      // Imperfect drop: low thunk + wood-tom layered
+      if (!unlocked) return;
+      const now = performance.now();
+      if (now - lastTapT < 30) return;
+      lastTapT = now;
+      const t = ac.currentTime;
+      kick(t, 0.55, 95);
+      tom(t, 240, 0.28);
+    }
+    function perfect(combo) {
+      // Perfect drop: bright tom chord + clap-ish snap. Pitch climbs combo.
+      if (!unlocked) return;
+      const t = ac.currentTime;
+      const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];
+      const stepSemi = PENTA[Math.min(combo - 1, PENTA.length - 1)];
+      const freq = theme.root * 2 * Math.pow(2, stepSemi / 12);
+      // Two-note chord
+      const notes = [freq, freq * 1.4983];
+      notes.forEach((f, i) => {
+        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = f;
+        const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = f * 2;
+        const g = ac.createGain();
+        const peak = 0.13 - i * 0.03;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(peak, t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+        o.connect(g); o2.connect(g); g.connect(fxGain);
+        if (combo >= 2) g.connect(delayNode);
+        o.start(t); o2.start(t);
+        o.stop(t + 0.4); o2.stop(t + 0.4);
+      });
+      // Clap-snap
+      const len = Math.floor(ac.sampleRate * 0.08);
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        const env = Math.pow(1 - i / len, 2.4);
+        data[i] = (Math.random() - 0.5) * 2 * env;
+      }
+      const ns = ac.createBufferSource(); ns.buffer = buf;
+      const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 2;
+      const cg = ac.createGain(); cg.gain.value = 0.22;
+      ns.connect(bp); bp.connect(cg); cg.connect(fxGain);
+      ns.start(t);
+    }
+    function comboBreak() {
+      if (!unlocked) return;
+      const t = ac.currentTime;
+      const o = ac.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(theme.root * 0.5, t);
+      o.frequency.exponentialRampToValueAtTime(theme.root * 0.25, t + 0.18);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0.08, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      o.connect(g); g.connect(fxGain);
+      o.start(t); o.stop(t + 0.26);
+    }
+    function die() {
+      if (!unlocked) return;
+      const t = ac.currentTime;
+      const notes = [theme.root * 0.5, theme.root * 0.5 * 1.122, theme.root * 0.25];
+      notes.forEach((f) => {
+        const o = ac.createOscillator(); o.type = 'sawtooth';
+        o.frequency.setValueAtTime(f, t);
+        o.frequency.exponentialRampToValueAtTime(f * 0.5, t + 0.6);
+        const lp = ac.createBiquadFilter(); lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(800, t);
+        lp.frequency.exponentialRampToValueAtTime(300, t + 0.5);
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.15, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+        o.connect(lp); lp.connect(g); g.connect(fxGain); g.connect(delayNode);
+        o.start(t); o.stop(t + 1.0);
+      });
+      // sub-impact
+      const sub = ac.createOscillator(); sub.type = 'sine';
+      sub.frequency.setValueAtTime(120, t);
+      sub.frequency.exponentialRampToValueAtTime(35, t + 0.7);
+      const subG = ac.createGain();
+      subG.gain.setValueAtTime(0.30, t);
+      subG.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+      sub.connect(subG); subG.connect(fxGain);
+      sub.start(t); sub.stop(t + 0.9);
+    }
+    function glassBreak(intensity = 1) {
+      if (!unlocked) return;
+      const t = ac.currentTime;
+      const shards = 5 + Math.floor(intensity * 5);
+      for (let i = 0; i < shards; i++) {
+        const delay = Math.random() * 0.13;
+        const baseF = 2400 + Math.random() * 4800;
+        const o = ac.createOscillator();
+        o.type = i % 2 === 0 ? 'sine' : 'triangle';
+        o.frequency.setValueAtTime(baseF, t + delay);
+        o.frequency.exponentialRampToValueAtTime(baseF * 0.42, t + delay + 0.16);
+        const g = ac.createGain();
+        const peak = (0.045 + Math.random() * 0.035) * intensity;
+        g.gain.setValueAtTime(0, t + delay);
+        g.gain.linearRampToValueAtTime(peak, t + delay + 0.003);
+        g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.20);
+        o.connect(g); g.connect(fxGain);
+        if (i < 3) g.connect(delayNode);
+        o.start(t + delay); o.stop(t + delay + 0.24);
+      }
+    }
+
+    return { unlock, drop, perfect, comboBreak, die, glassBreak, onThemeChange };
+  })();
+
+  // ----- Update + render -----------------------------------------------------
+  function update(dt) {
+    // Camera ease
+    state.cameraOffset += (0 - state.cameraOffset) * Math.min(1, CAMERA_LERP * dt);
+    if (state.shake > 0) state.shake = Math.max(0, state.shake - 22 * dt);
+
+    // Candidate motion
+    if (state.candidate && !state.gameOver) {
+      const c = state.candidate;
+      c.x += c.vx * dt;
+      // Reverse at the edges (allow some off-screen room)
+      const margin = c.width * 0.4;
+      if (c.x < -margin)         { c.x = -margin;         c.vx = Math.abs(c.vx); }
+      if (c.x + c.width > W + margin) { c.x = W + margin - c.width; c.vx = -Math.abs(c.vx); }
+    }
+
+    // Falling chunks
+    for (let i = state.chunks.length - 1; i >= 0; i--) {
+      const ch = state.chunks[i];
+      ch.vy += 1600 * dt;
+      ch.y += ch.vy * dt;
+      ch.x += ch.vx * dt;
+      ch.rot += ch.vr * dt;
+      ch.life -= dt;
+      if (ch.life <= 0) state.chunks.splice(i, 1);
+    }
+    // Sparks
+    for (let i = state.sparks.length - 1; i >= 0; i--) {
+      const s = state.sparks[i];
+      s.x += s.vx * dt;
+      s.screenYOffset += s.vy * dt;
+      s.vy += 320 * dt;
+      const decay = Math.pow(0.92, dt * 60);
+      s.vx *= decay;
+      s.life -= dt;
+      if (s.life <= 0) state.sparks.splice(i, 1);
+    }
+  }
+
+  function fillBackground() {
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(0, 0, W, H);
+    // Soft vertical gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function topAnchorY() { return H * TOP_ANCHOR_FRAC; }
+
+  // Block i sits in the tower at index i (0 = ground). Its TOP edge screen y:
+  //   topY = topAnchorY() + (lastIndex - i) * BLOCK_H - cameraOffset
+  // The most-recently placed block has lastIndex; its topY = anchor - offset.
+  // The candidate sits just above the top block.
+  function blockTopY(i) {
+    const last = state.blocks.length - 1;
+    return topAnchorY() + (last - i) * BLOCK_H - state.cameraOffset;
+  }
+  function candidateTopY() {
+    return topAnchorY() - BLOCK_H - state.cameraOffset;
+  }
+
+  function drawBlock(b, topY, alpha = 1) {
+    const baseColor = `hsl(${b.hue}, 78%, 55%)`;
+    const highlight = `hsl(${b.hue}, 78%, 70%)`;
+    const shadow    = `hsl(${b.hue}, 78%, 38%)`;
+    ctx.globalAlpha = alpha;
+    // Drop shadow under block
+    ctx.fillStyle = 'rgba(0,0,0,0.20)';
+    ctx.fillRect(b.x + 4, topY + BLOCK_H - 4, b.width, 6);
+    // Main face
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(b.x, topY, b.width, BLOCK_H);
+    // Top highlight strip (4px)
+    ctx.fillStyle = highlight;
+    ctx.fillRect(b.x, topY, b.width, 4);
+    // Bottom shadow strip
+    ctx.fillStyle = shadow;
+    ctx.fillRect(b.x, topY + BLOCK_H - 4, b.width, 4);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTower() {
+    // Draw blocks from top to bottom (so shadow stacking is right)
+    const lastIdx = state.blocks.length - 1;
+    for (let i = lastIdx; i >= 0; i--) {
+      const b = state.blocks[i];
+      const topY = blockTopY(i);
+      if (topY > H + BLOCK_H) break;       // off-screen below
+      drawBlock(b, topY);
+    }
+  }
+  function drawCandidate() {
+    if (!state.candidate || state.gameOver) return;
+    const c = state.candidate;
+    const topY = candidateTopY();
+    drawBlock(c, topY);
+  }
+  function drawChunks() {
+    for (const ch of state.chunks) {
+      const a = Math.max(0, ch.life / ch.maxLife);
+      const screenY = candidateTopY() + ch.y;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.translate(ch.x + ch.w / 2, screenY + BLOCK_H / 2);
+      ctx.rotate(ch.rot);
+      ctx.fillStyle = `hsl(${ch.hue}, 78%, 50%)`;
+      ctx.fillRect(-ch.w / 2, -BLOCK_H / 2, ch.w, BLOCK_H);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function drawSparks() {
+    for (const s of state.sparks) {
+      const a = Math.max(0, s.life / s.maxLife);
+      const screenY = candidateTopY() + BLOCK_H * 0.5 + s.screenYOffset;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = `hsl(${s.hue}, 92%, 65%)`;
+      ctx.shadowColor = `hsla(${s.hue}, 92%, 70%, 0.6)`;
+      ctx.shadowBlur = 8 * baseScale;
+      ctx.beginPath();
+      ctx.arc(s.x, screenY, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  // ----- Loop ---------------------------------------------------------------
+  let lastT = performance.now();
+  let running = true;
+  function tick(now) {
+    if (!running) { lastT = now; requestAnimationFrame(tick); return; }
+    const dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+    update(dt);
+
+    // Shake
+    const sx = (Math.random() - 0.5) * state.shake;
+    const sy = (Math.random() - 0.5) * state.shake;
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    fillBackground();
+    drawTower();
+    drawChunks();
+    drawCandidate();
+    drawSparks();
+
+    ctx.restore();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame((t) => { lastT = t; tick(t); });
+
+  document.addEventListener('visibilitychange', () => {
+    running = document.visibilityState === 'visible';
+    lastT = performance.now();
+  });
+})();
+</script>
+</body>
+</html>
