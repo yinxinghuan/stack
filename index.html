@@ -247,6 +247,14 @@
   const TOP_ANCHOR_FRAC       = 0.42;          // tower top sits at this screen y
   const CAMERA_LERP           = 9;             // smooth camera scroll
   const HUE_START             = 0;
+  // Block drop animation: when placed, block starts -DROP_OFFSET y from final
+  // and springs into place. Provides the "real drop" feel instead of teleport.
+  const DROP_OFFSET           = 26;            // px above final position
+  const DROP_SPRING_K         = 520;
+  const DROP_SPRING_D         = 18;
+  // Tower sway: whole tower offsets horizontally on each impact, springs back.
+  const SWAY_SPRING_K         = 180;
+  const SWAY_SPRING_D         = 11;
 
   // ----- State --------------------------------------------------------------
   let themeName = 'prism';
@@ -276,6 +284,7 @@
       flashAlpha: 0,                   // 1-frame screen flash on perfect
       chunks: [],                      // falling overhang pieces
       ambient: [],                     // background drifting motes
+      towerSway: { x: 0, vx: 0 },      // horizontal impact sway (springs to 0)
       shake: 0,
       interacted: false,
     };
@@ -412,6 +421,17 @@
       state.bestCombo = state.combo;
       localStorage.setItem('stack.bestCombo', String(state.bestCombo));
     }
+
+    // Drop animation: new block starts above its final spot and springs in
+    placed.dropOffset = -DROP_OFFSET;
+    placed.dropVy = 0;
+
+    // Tower sway: kick away from the impact. Direction = sign of offset
+    // (where the candidate landed relative to the previous top). Perfect drops
+    // give a mild kick in the candidate's travel direction.
+    const swayDir = isPerfect ? Math.sign(c.vx) : Math.sign(c.x - prev.x);
+    const swayMag = isPerfect ? 80 : 160;
+    state.towerSway.vx += swayDir * swayMag;
 
     state.blocks.push(placed);
     counterEl.textContent = score().toString();
@@ -785,6 +805,28 @@
     state.cameraOffset += (0 - state.cameraOffset) * Math.min(1, CAMERA_LERP * dt);
     if (state.shake > 0) state.shake = Math.max(0, state.shake - 22 * dt);
 
+    // Tower sway: damped spring toward 0
+    {
+      const a = -SWAY_SPRING_K * state.towerSway.x - SWAY_SPRING_D * state.towerSway.vx;
+      state.towerSway.vx += a * dt;
+      state.towerSway.x  += state.towerSway.vx * dt;
+      // Snap to rest below threshold
+      if (Math.abs(state.towerSway.x) < 0.2 && Math.abs(state.towerSway.vx) < 4) {
+        state.towerSway.x = 0; state.towerSway.vx = 0;
+      }
+    }
+
+    // Per-block drop-in spring (only the most recently placed has non-zero offset)
+    for (const b of state.blocks) {
+      if (b.dropOffset == null || b.dropOffset === 0) continue;
+      const a = -DROP_SPRING_K * b.dropOffset - DROP_SPRING_D * b.dropVy;
+      b.dropVy += a * dt;
+      b.dropOffset += b.dropVy * dt;
+      if (Math.abs(b.dropOffset) < 0.3 && Math.abs(b.dropVy) < 5) {
+        b.dropOffset = 0; b.dropVy = 0;
+      }
+    }
+
     // Candidate motion
     if (state.candidate && !state.gameOver) {
       const c = state.candidate;
@@ -978,26 +1020,69 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawTower() {
-    // Draw blocks from bottom-up so 3D side faces overlap correctly:
-    // farther (lower-index = lower on screen) renders first.
+  function getVisibleBlocks() {
     const lastIdx = state.blocks.length - 1;
-    // collect visible
     const visible = [];
     for (let i = lastIdx; i >= 0; i--) {
       const topY = blockTopY(i);
       if (topY > H + BLOCK_H + BLOCK_DEPTH) break;
       visible.push({ b: state.blocks[i], topY, i });
     }
-    // draw in reverse order (oldest first, top of stack last)
+    return { visible, lastIdx };
+  }
+
+  function drawTower() {
+    const { visible, lastIdx } = getVisibleBlocks();
+    // Apply horizontal tower-sway offset for the whole tower
+    ctx.save();
+    ctx.translate(state.towerSway.x, 0);
+    // Draw in reverse order (oldest first, top of stack last) so 3D faces overlap right
     for (let k = visible.length - 1; k >= 0; k--) {
       const { b, topY, i } = visible[k];
-      // Depth fade: blocks lower on screen (further down the tower) get
-      // progressively darker and slightly desaturated, suggesting depth.
       const depthBelow = (lastIdx - i);
       const fadeAlpha = Math.max(0.45, 1 - depthBelow * 0.038);
-      drawBlock(b, topY, fadeAlpha);
+      const off = b.dropOffset || 0;
+      drawBlock(b, topY + off, fadeAlpha);
     }
+    ctx.restore();
+  }
+
+  // Mirrored copy of the tower below the lowest visible block. Adds a subtle
+  // "showcase pedestal" feel without obscuring the play area.
+  function drawReflection() {
+    const { visible } = getVisibleBlocks();
+    if (visible.length === 0) return;
+    // Reflection origin = bottom of the lowest visible block
+    const bottomVisible = visible[0];      // visible is collected top→bottom by Y; reverse?
+    // visible array: pushed as we iterate i from lastIdx down, so first element is TOP, last is BOTTOM
+    const lowest = visible[visible.length - 1];
+    const reflLine = lowest.topY + BLOCK_H;
+    if (reflLine > H) return;              // line off-screen: skip
+
+    ctx.save();
+    // Clip to area below reflection line
+    ctx.beginPath();
+    ctx.rect(0, reflLine, W, H - reflLine);
+    ctx.clip();
+    // Flip vertically about reflLine, plus tower-sway shift
+    ctx.translate(state.towerSway.x, 2 * reflLine);
+    ctx.scale(1, -1);
+
+    for (let k = visible.length - 1; k >= 0; k--) {
+      const { b, topY, i } = visible[k];
+      const depthBelow = (state.blocks.length - 1 - i);
+      const fadeAlpha = Math.max(0.45, 1 - depthBelow * 0.038);
+      const off = b.dropOffset || 0;
+      drawBlock(b, topY + off, fadeAlpha * 0.22);
+    }
+    ctx.restore();
+
+    // Vertical fade-to-black gradient over the reflection area for natural falloff
+    const grad = ctx.createLinearGradient(0, reflLine, 0, H);
+    grad.addColorStop(0, 'rgba(0,0,0,0.15)');
+    grad.addColorStop(1, 'rgba(0,0,0,1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, reflLine, W, H - reflLine);
   }
   function drawCandidate() {
     if (!state.candidate || state.gameOver) return;
@@ -1095,6 +1180,7 @@
 
     fillBackground();
     drawAmbient();
+    drawReflection();
     drawTower();
     drawChunks();
     drawCandidate();
