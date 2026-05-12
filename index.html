@@ -238,6 +238,7 @@
   const CANDIDATE_VX_GROWTH   = 3.2;           // per height added
   const CANDIDATE_VX_CAP      = 540;
   const PERFECT_TOLERANCE     = 7;             // px diff that counts as perfect
+  const PERFECT_REGROWTH      = 9;             // px the block grows back on perfect
   const TOP_ANCHOR_FRAC       = 0.42;          // tower top sits at this screen y
   const CAMERA_LERP           = 9;             // smooth camera scroll
   const HUE_START             = 0;
@@ -265,6 +266,9 @@
       bestCombo: parseInt(localStorage.getItem('stack.bestCombo') || '0', 10) || 0,
       gameOver: false,
       sparks: [],                      // perfect-drop sparkles
+      pulses: [],                      // radial expanding rings on perfect
+      floatTexts: [],                  // "+N" floating bonus texts
+      flashAlpha: 0,                   // 1-frame screen flash on perfect
       chunks: [],                      // falling overhang pieces
       shake: 0,
       interacted: false,
@@ -322,14 +326,39 @@
     const isPerfect = offset < PERFECT_TOLERANCE;
     let placed;
     if (isPerfect) {
-      // Perfect: snap to previous block's x, keep full width, combo++
-      placed = { x: prev.x, width: prev.width, height: BLOCK_H, hue: c.hue };
+      // Perfect: snap to previous block's x; WIDTH REGROWS toward original
+      // (classic Stack reward — you can recover from a thin tower with a
+      // streak of perfects). Combo bonus on top.
+      const grown = Math.min(prev.width + PERFECT_REGROWTH, INITIAL_BLOCK_W);
+      placed = {
+        x: prev.x - (grown - prev.width) / 2,        // grow symmetrically
+        width: grown,
+        height: BLOCK_H,
+        hue: c.hue,
+      };
+      // Clamp inside screen
+      if (placed.x < 0) placed.x = 0;
+      if (placed.x + placed.width > W) placed.x = W - placed.width;
       state.combo++;
       audio.perfect(state.combo);
       spawnPerfectSparks(placed);
+      spawnRadialPulse(placed);
       perfectBan.classList.add('flash');
       setTimeout(() => perfectBan.classList.remove('flash'), 450);
-      state.shake = 3;
+      state.shake = 5;
+      // Floating "+N" with combo bonus text
+      const bonus = 1 + state.combo;
+      state.floatTexts.push({
+        text: `+${bonus}`,
+        x: placed.x + placed.width / 2,
+        screenYOffset: 0,
+        life: 1.0,
+        maxLife: 1.0,
+        hue: placed.hue,
+        big: true,
+      });
+      // Screen flash overlay (1 frame)
+      state.flashAlpha = 0.35;
     } else {
       placed = { x: overlapStart, width: overlap, height: BLOCK_H, hue: c.hue };
       // Falling chunks for the trimmed portion(s)
@@ -387,21 +416,31 @@
 
   function spawnPerfectSparks(placed) {
     const hue = placed.hue;
-    const n = 22;
+    const n = 48;                                 // much more particles
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const spd = (140 + Math.random() * 200) * baseScale;
+      const spd = (180 + Math.random() * 280) * baseScale;
       state.sparks.push({
         x: placed.x + Math.random() * placed.width,
         screenYOffset: 0,
         vx: Math.cos(a) * spd,
-        vy: Math.sin(a) * spd - 80,
-        life: 0.5 + Math.random() * 0.5,
+        vy: Math.sin(a) * spd - 120,
+        life: 0.55 + Math.random() * 0.65,
         maxLife: 1,
-        size: (1.4 + Math.random() * 2.0) * baseScale,
+        size: (1.8 + Math.random() * 2.4) * baseScale,
         hue,
       });
     }
+  }
+  function spawnRadialPulse(placed) {
+    state.pulses.push({
+      x: placed.x + placed.width / 2,
+      screenYOffset: 0,
+      r: 0,
+      maxR: Math.max(W * 0.55, placed.width * 1.6),
+      life: 0.45, maxLife: 0.45,
+      hue: placed.hue,
+    });
   }
 
   // ----- Input ---------------------------------------------------------------
@@ -753,6 +792,22 @@
       s.life -= dt;
       if (s.life <= 0) state.sparks.splice(i, 1);
     }
+    // Radial pulses
+    for (let i = state.pulses.length - 1; i >= 0; i--) {
+      const p = state.pulses[i];
+      p.life -= dt;
+      p.r = p.maxR * (1 - p.life / p.maxLife);
+      if (p.life <= 0) state.pulses.splice(i, 1);
+    }
+    // Floating "+N" texts
+    for (let i = state.floatTexts.length - 1; i >= 0; i--) {
+      const f = state.floatTexts[i];
+      f.screenYOffset -= (f.big ? 70 : 50) * dt;
+      f.life -= dt;
+      if (f.life <= 0) state.floatTexts.splice(i, 1);
+    }
+    // Screen flash decay
+    if (state.flashAlpha > 0) state.flashAlpha = Math.max(0, state.flashAlpha - 2.0 * dt);
   }
 
   function fillBackground() {
@@ -846,6 +901,49 @@
     ctx.shadowBlur = 0;
   }
 
+  function drawPulses() {
+    // Radial expanding rings from the perfect-drop point
+    for (const p of state.pulses) {
+      const t = 1 - p.life / p.maxLife;
+      const screenY = candidateTopY() + BLOCK_H * 0.5 + p.screenYOffset;
+      const alpha = (1 - t) * 0.6;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = `hsl(${p.hue}, 92%, 70%)`;
+      ctx.lineWidth = (1 - t) * 6 * baseScale + 1;
+      ctx.shadowColor = `hsla(${p.hue}, 92%, 75%, 0.8)`;
+      ctx.shadowBlur = 16 * baseScale;
+      ctx.beginPath();
+      ctx.arc(p.x, screenY, p.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  function drawFloatTexts() {
+    for (const f of state.floatTexts) {
+      const a = Math.max(0, f.life / f.maxLife);
+      const screenY = candidateTopY() + BLOCK_H * 0.5 + f.screenYOffset;
+      const fontSize = (f.big ? 30 : 20) * baseScale;
+      ctx.globalAlpha = a;
+      ctx.font = `${fontSize}px ui-monospace, Menlo, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = `hsl(${f.hue}, 95%, 70%)`;
+      ctx.shadowColor = `hsla(${f.hue}, 95%, 75%, 0.85)`;
+      ctx.shadowBlur = 12 * baseScale;
+      ctx.fillText(f.text, f.x, screenY);
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  function drawFlash() {
+    if (state.flashAlpha <= 0) return;
+    ctx.fillStyle = `rgba(255,255,255,${state.flashAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
   // ----- Loop ---------------------------------------------------------------
   let lastT = performance.now();
   let running = true;
@@ -865,7 +963,10 @@
     drawTower();
     drawChunks();
     drawCandidate();
+    drawPulses();
     drawSparks();
+    drawFloatTexts();
+    drawFlash();
 
     ctx.restore();
     requestAnimationFrame(tick);
