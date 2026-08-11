@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+    <script src="./alteru-storage-scope.js" data-alteru-storage-scope data-game-storage-id="ff62e46e-212d-4a61-8085-2b99bb5fc760"></script>
     <meta name="game-uuid" content="ff62e46e-212d-4a61-8085-2b99bb5fc760" />
 
 <meta charset="UTF-8" />
@@ -641,8 +642,8 @@
       direction: 1,                    // +1 → moves right, -1 → moves left
       cameraOffset: 0,                 // smooth scroll (px). Lerps to 0 after each drop.
       combo: 0,
-      best: parseInt(localStorage.getItem('stack.best') || '0', 10) || 0,
-      bestCombo: parseInt(localStorage.getItem('stack.bestCombo') || '0', 10) || 0,
+      best: parseInt(alteruLocalStorage.getItem('stack.best') || '0', 10) || 0,
+      bestCombo: parseInt(alteruLocalStorage.getItem('stack.bestCombo') || '0', 10) || 0,
       gameOver: false,
       sparks: [],                      // perfect-drop sparkles
       pulses: [],                      // radial expanding rings on perfect
@@ -787,7 +788,7 @@
     }
     if (state.combo > state.bestCombo) {
       state.bestCombo = state.combo;
-      localStorage.setItem('stack.bestCombo', String(state.bestCombo));
+      alteruLocalStorage.setItem('stack.bestCombo', String(state.bestCombo));
     }
 
     // Drop animation: new block starts above its final spot and springs in
@@ -811,7 +812,7 @@
     if (score() > state.best) {
       state.best = score();
       bestEl.textContent = state.best.toLocaleString('en-US');
-      localStorage.setItem('stack.best', String(state.best));
+      alteruLocalStorage.setItem('stack.best', String(state.best));
     }
 
     // Glass-shatter milestones on combo
